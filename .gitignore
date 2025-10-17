@@ -1,32 +1,18 @@
-# === Python ===
+# Python cache and build files
 __pycache__/
 *.py[cod]
 *.egg-info/
 *.log
 *.sqlite3
 
-# === Virtual Environments ===
+# Virtual environments
+venv/
 .env/
 capstone/
 
-# === Jupyter Notebooks ===
-.ipynb_checkpoints/
-
-# === OS Files ===
+# OS & editor
 .DS_Store
 Thumbs.db
-
-# === Build/Packaging ===
-build/
-dist/
-*.egg
-
-# === Editor/IDE Settings ===
-.idea/
 .vscode/
-*.swp
-*.swo
+.idea/
 
-# === Misc ===
-*.bak
-*.tmp
