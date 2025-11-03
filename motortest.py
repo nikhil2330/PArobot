@@ -1,46 +1,47 @@
-
-from gpiozero import LED, PWMLED
+from gpiozero import PWMLED, LED
 from time import sleep
 
-# Left motor group
-l1 = LED("BOARD13")   # IN1
-l2 = LED("BOARD11")   # IN2
-le = PWMLED("BOARD18") # ENA
+# Left BTS7960
+l_rpwm = PWMLED("BOARD33")   # GPIO13
+l_lpwm = PWMLED("BOARD31")   # GPIO6
+l_en   = LED("BOARD29")      # GPIO5
 
-# Right motor group
-r1 = LED("BOARD22")   # IN4
-r2 = LED("BOARD40")   # IN3
-re = PWMLED("BOARD12") # ENB
+# Right BTS7960
+r_rpwm = PWMLED("BOARD35")   # GPIO19
+r_lpwm = PWMLED("BOARD37")   # GPIO26
+r_en   = LED("BOARD32")      # GPIO12
+
+def enable_all():
+    l_en.on(); r_en.on()
+
+def disable_all():
+    l_en.off(); r_en.off()
 
 def stop():
-    l1.off(); l2.off(); le.value = 0
-    r1.off(); r2.off(); re.value = 0
+    l_rpwm.value = l_lpwm.value = 0
+    r_rpwm.value = r_lpwm.value = 0
 
-def forward(speed=1):
-    l1.on(); l2.off(); le.value = speed
-    r1.on(); r2.off(); re.value = speed
+def forward(speed=0.6):
+    l_rpwm.value = speed; l_lpwm.value = 0
+    r_rpwm.value = speed; r_lpwm.value = 0
 
-def backward(speed=1):
-    l1.off(); l2.on(); le.value = speed
-    r1.off(); r2.on(); re.value = speed
+def backward(speed=0.6):
+    l_rpwm.value = 0; l_lpwm.value = speed
+    r_rpwm.value = 0; r_lpwm.value = speed
 
-def left(speed=1):
-    l1.off(); l2.on(); le.value = speed
-    r1.on(); r2.off(); re.value = speed
+def left(speed=0.6):
+    l_rpwm.value = 0; l_lpwm.value = speed
+    r_rpwm.value = speed; r_lpwm.value = 0
 
-def right(speed=1):
-    l1.on(); l2.off(); le.value = speed
-    r1.off(); r2.on(); re.value = speed
+def right(speed=0.6):
+    l_rpwm.value = speed; l_lpwm.value = 0
+    r_rpwm.value = 0; r_lpwm.value = speed
 
-# Test sequence
-print("Forward")
-forward(1); sleep(2)
-print("Backward")
-backward(1); sleep(2)
-print("Left turn")
-left(); sleep(2)
-print("Right turn")
-right(); sleep(2)
-print("Stop")
-stop()
-
+# ==== TEST SEQUENCE ====
+enable_all()
+print("Forward");  forward(0.5);  sleep(2)
+print("Backward"); backward(0.5); sleep(2)
+print("Left");     left(0.5);     sleep(2)
+print("Right");    right(0.5);    sleep(2)
+print("Stop");     stop()
+disable_all()

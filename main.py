@@ -14,7 +14,7 @@
 # I added my own method of drawing boxes and labels using OpenCV.
 
 # Import packages
-import os
+import os, sys, types
 import argparse
 import cv2
 import numpy as np
@@ -32,8 +32,8 @@ from matplotlib.animation import FuncAnimation
 import math
 import threading
 import time
-
 from picamera2 import Picamera2
+
 
 
 
@@ -180,6 +180,7 @@ if use_TPU:
 # Get path to current working directory
 CWD_PATH = os.getcwd()
 
+
 # Path to .tflite file, which contains the model that is used for object detection
 PATH_TO_CKPT = os.path.join(CWD_PATH,MODEL_NAME,GRAPH_NAME)
 
@@ -257,53 +258,90 @@ fov_left_line, = ax.plot([], [], 'orange', linewidth=1.5)
 fov_right_line, = ax.plot([], [], 'orange', linewidth=1.5)
 ax.legend(loc="upper right")
 
-turn = 70
-forward_speed = 60
+# --- CONTROL & BEHAVIOR CONSTANTS ---------------------------------------------
 
+# --- Motion & turning ---
+turn = 90                   # max turning PWM output
+forward_speed = 60          # max forward PWM output
+
+# --- Behavior tuning ---
+accel_rate = 50.0           # rate of change for speed (units/sec)
+alpha = 0.3                 # smoothing factor for person x-position (0-1)
+dead_zone_ratio = 0.1       # ignore small horizontal errors (normalized -1..1)
+turn_sensitivity = 0.9      # scale turning reactivity
+lost_timeout = 1.0          # sec - how long to remember last seen person
+
+# --- Distance thresholds (in meters) ---
+FOLLOW_FAR   = 1.10         # go forward if person farther than this
+FOLLOW_NEAR  = 0.90         # back up if closer than this
+SIDE_WARN    = 0.60         # start turning away if obstacle nearer than this
+SIDE_STOP    = 0.40         # stop forward motion if obstacle too close
+RANGE_MIN    = 0.15         # ignore invalid or ultra-close lidar hits
+RANGE_MAX    = 3.00         # ignore far lidar hits
+CLOSE_RATE   = 0.30         # m/s - braking trigger (approach rate)
+
+# --- LIDAR cone geometry (radians) ---
+CENTER_FOV   = math.radians(60.0)   # total width of front tracking cone
+FRONT_MARGIN = math.radians(6.0)    # half-angle for center cone
+SIDE_OFFSET  = math.radians(20.0)   # offset from center to start side cone
+SIDE_SPREAD  = math.radians(40.0)   # side cone angular spread
+
+# --- Initialization for motion state ---
 last_update = time.time()
 current_forward = 0.0
 current_turn = 0.0
 
-smooth_x = None
-dead_zone = 60 
+prev_dist = None       # last distance to person (for braking)
+front_distance = None  # current measured distance to person
+left_min = None        # nearest obstacle left
+right_min = None       # nearest obstacle right
+
+smooth_x = None        # smoothed person x-center
 
 last_person_box = None
 last_confidence_time = 0
-lost_timeout = 1.0  
 
-# --- Behavior tuning ---
-no_detect_counter = 0
-accel_rate = 35.0           # faster ramp-up
-alpha = 0.3                 # faster smoothing
-dead_zone_ratio = 0.2       # more reactive center zone
-turn_sensitivity = 0.9      # stronger turn response
 
-# --- Main control loop ---
+person_visible = False
+last_seen_time = 0.0
+last_seen_angle = 0.0
+last_seen_dist = 1.0
+recovery_mode = False
+recovery_phase = 0
+recovery_start = 0.0
+SAFETY_MARGIN = 0.3
+RECOVERY_TURN_SPEED = 0.6
+LOST_TIMEOUT = 1.0
+
+
+# --- MAIN CONTROL LOOP --------------------------------------------------------
+
+# --- MAIN CONTROL LOOP --------------------------------------------------------
 while True:
     frame_count += 1
     t1 = cv2.getTickCount()
-
     frame1 = videostream.read()
     if frame1 is None:
         continue
     frame = frame1.copy()
-    
+
+    # --- TensorFlow person detection ---
     frame_resized = cv2.resize(frame, (width, height))
     input_data = np.expand_dims(frame_resized, axis=0)
     if floating_model:
         input_data = (np.float32(input_data) - input_mean) / input_std
-
     interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
-    boxes = interpreter.get_tensor(output_details[boxes_idx]['index'])[0]
-    classes = interpreter.get_tensor(output_details[classes_idx]['index'])[0]
-    scores = interpreter.get_tensor(output_details[scores_idx]['index'])[0]
 
-    center_angle = 0
-    a = False
+    boxes   = interpreter.get_tensor(output_details[boxes_idx]['index'])[0]
+    classes = interpreter.get_tensor(output_details[classes_idx]['index'])[0]
+    scores  = interpreter.get_tensor(output_details[scores_idx]['index'])[0]
+
+    center_angle = 0.0
+    detected = False
     now = time.time()
-    
-    # --- Object detection ---
+
+    # --- Person detection check ---
     for i in range(len(scores)):
         if 0.59 < scores[i] <= 1.0:
             ymin = int(max(1, (boxes[i][0] * imH)))
@@ -312,125 +350,202 @@ while True:
             xmax = int(min(imW, (boxes[i][3] * imW)))
             object_name = labels[int(classes[i])]
             if object_name == 'person':
-                a = True
+                detected = True
                 last_person_box = (xmin, ymin, xmax, ymax)
                 last_confidence_time = now
                 break
 
-    if not a and last_person_box and (now - last_confidence_time) < lost_timeout:
+    # --- Use last known position briefly ---
+    if (not detected) and last_person_box and (now - last_confidence_time) < lost_timeout:
         xmin, ymin, xmax, ymax = last_person_box
-        a = True
+        detected = True
         print("Using last known position")
 
+    # --- Update person-visibility timers/state ---
+    if detected:
+        person_visible = True
+        last_seen_time = now
+    else:
+        # trigger recovery once we've exceeded the timeout
+        if (now - last_seen_time) > LOST_TIMEOUT and not recovery_mode:
+            person_visible = False
+            recovery_mode = True
+            recovery_phase = 0
+            recovery_start = now
+            print("Person lost → starting recovery sequence")
+
+    # --- Targets (PWM space) ---
     target_forward = 0.0
     target_turn = 0.0
 
-    # --- If person detected ---
-    if a:
+    # =====================================================================
+    # NORMAL FOLLOW (person visible / remembered this frame, not recovering)
+    # =====================================================================
+    if detected and not recovery_mode:
         no_detect_counter = 0
+
+        # draw bbox + label
         cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (10, 255, 0), 2)
         x = (xmin + xmax) / 2.0
         y = (ymin + ymax) / 2.0
+        label = f"{int(x)},{int(y)}"
+        labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        label_ymin = max(ymin, labelSize[1] + 10)
+        cv2.rectangle(frame,
+                      (xmin, label_ymin - labelSize[1] - 10),
+                      (xmin + labelSize[0], label_ymin + baseLine - 10),
+                      (255, 255, 255), cv2.FILLED)
+        cv2.putText(frame, label, (xmin, label_ymin - 7),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
-        if smooth_x is None:
-            smooth_x = x
-        else:
-            smooth_x = alpha * x + (1 - alpha) * smooth_x
+        # smooth x tracking
+        smooth_x = x if smooth_x is None else (alpha * x + (1 - alpha) * smooth_x)
 
         frame_center = imW / 2.0
         center_error = smooth_x - frame_center
-        error_ratio = center_error / frame_center  # normalized -1..1
+        error_ratio = center_error / frame_center  # [-1..1]
 
+        # horizontal control
         if abs(error_ratio) > dead_zone_ratio:
             target_turn = np.clip(-turn * error_ratio * turn_sensitivity, -turn, turn)
         else:
             target_turn = 0.0
 
-        # --- LIDAR distance check ---
-        fov = math.radians(60.0)
+        # lidar angle aligned to person
         x_offset = (x - frame_center) / frame_center
-        center_angle = x_offset * (fov / 2.0)
-        margin = math.radians(6.0)
+        center_angle = x_offset * (CENTER_FOV / 2.0)
+        last_seen_angle = center_angle  # remember for recovery
 
+        # --- LiDAR sampling ---
         if laser.doProcessSimple(scan):
-            angle_min = center_angle - margin
-            angle_max = center_angle + margin
-            target_points = [
-                p.range for p in scan.points
-                if (angle_min <= p.angle <= angle_max) and (0.15 < p.range)
-            ]
+            # front (person-centered)
+            a_min = center_angle - FRONT_MARGIN
+            a_max = center_angle + FRONT_MARGIN
+            target_points = [p.range for p in scan.points
+                             if (a_min <= p.angle <= a_max) and (RANGE_MIN < p.range)]
             front_distance = np.median(sorted(target_points)[:3]) if target_points else None
-        else:
-            front_distance = None
 
-        if front_distance is not None:
-            print(f"Distance: {front_distance:.2f} m")
-            if front_distance > 1.3:
-                target_forward = forward_speed
-            elif front_distance < 0.8:
-                target_forward = -forward_speed
+            # sides (person-relative)
+            left_points = [p.range for p in scan.points
+                           if (center_angle + SIDE_OFFSET) < p.angle < (center_angle + SIDE_OFFSET + SIDE_SPREAD)
+                           and RANGE_MIN < p.range < RANGE_MAX]
+            right_points = [p.range for p in scan.points
+                            if (center_angle - SIDE_OFFSET - SIDE_SPREAD) < p.angle < (center_angle - SIDE_OFFSET)
+                            and RANGE_MIN < p.range < RANGE_MAX]
+            left_min  = min(left_points)  if left_points  else None
+            right_min = min(right_points) if right_points else None
+
+            # follow distance band
+            if front_distance is not None:
+                last_seen_dist = front_distance  # remember
+                if front_distance > FOLLOW_FAR:
+                    target_forward = forward_speed
+                elif front_distance < FOLLOW_NEAR:
+                    target_forward = -forward_speed
+                else:
+                    target_forward = 0.0
+
+            # obstacle shaping
+            avoid_turn, avoid_forward = 0.0, 1.0
+            if left_min  and left_min  < SIDE_WARN: avoid_turn += 0.5
+            if right_min and right_min < SIDE_WARN: avoid_turn -= 0.5
+            if (left_min and left_min < SIDE_STOP) or (right_min and right_min < SIDE_STOP):
+                avoid_forward = 0.0
+
+            target_turn    += avoid_turn * turn
+            target_forward *= avoid_forward
+
+            # predictive braking
+            if (prev_dist is not None) and (front_distance is not None):
+                rate = (prev_dist - front_distance) / (now - last_update)
+                if rate > CLOSE_RATE:
+                    target_forward *= max(0.0, 1.0 - rate)
+            prev_dist = front_distance
+
+    # =====================================================================
+    # RECOVERY MODE
+    # =====================================================================
+    elif recovery_mode:
+        # safe fallbacks when no fresh lidar
+        f = front_distance if front_distance is not None else 99.0
+        l = left_min if left_min is not None else 99.0
+        r = right_min if right_min is not None else 99.0
+        target_forward, target_turn = 0.0, 0.0
+
+        if recovery_phase == 0:
+            # (0) TURN AWAY until the front clears
+            if f < 0.7:
+                target_turn = RECOVERY_TURN_SPEED if l >= r else -RECOVERY_TURN_SPEED
             else:
-                target_forward = 0.0
+                recovery_phase = 1
+                recovery_start = now
+                print("→ Phase 1 done: start forward move")
 
-        # --- Label ---
-        label = str(int(x)) + "," + str(int(y))
-        labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-        label_ymin = max(ymin, labelSize[1] + 10)
-        cv2.rectangle(frame, (xmin, label_ymin - labelSize[1] - 10),
-                      (xmin + labelSize[0], label_ymin + baseLine - 10),
-                      (255, 255, 255), cv2.FILLED)
-        cv2.putText(frame, label, (xmin, label_ymin - 7),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
-    else:
-        no_detect_counter += 1
-        if no_detect_counter > 5:
-            target_forward = 0.0
-            target_turn = 0.0
+        elif recovery_phase == 1:
+            # (1) MOVE FORWARD until near the last seen distance (minus margin)
+            target_forward = forward_speed * 0.5
+            if (front_distance is not None) and (front_distance <= (last_seen_dist - SAFETY_MARGIN)):
+                recovery_phase = 2
+                recovery_start = now
+                print("→ Phase 2: peek around corner")
+            elif (front_distance is not None) and (front_distance < 0.4):
+                target_forward = 0.0  # hard stop if something too close
 
-    # --- Smooth acceleration ---
+        elif recovery_phase == 2:
+            # (2) PEEK: rotate toward last-seen angle; creep if clear
+            target_turn = RECOVERY_TURN_SPEED if last_seen_angle >= 0 else -RECOVERY_TURN_SPEED
+            if f > 1.0:
+                target_forward = forward_speed * 0.4
+            # exit recovery as soon as the person is seen
+            if detected:
+                recovery_mode = False
+                recovery_phase = 0
+                prev_dist = None
+                person_visible = True
+                last_seen_time = now
+                print("Person reacquired → back to follow mode")
+
+    # =====================================================================
+    # SMOOTH ACCEL + DRIVE
+    # =====================================================================
     dt = now - last_update
     last_update = now
     ramp_step = accel_rate * dt
 
     def ramp(current, target, step):
-        if current < target:
-            current = min(current + step, target)
-        elif current > target:
-            current = max(current - step, target)
+        if current < target: return min(current + step, target)
+        if current > target: return max(current - step, target)
         return current
 
     current_forward = ramp(current_forward, target_forward, ramp_step)
-    current_turn = ramp(current_turn, target_turn, ramp_step)
+    current_turn    = ramp(current_turn,    target_turn,    ramp_step)
 
-    left = np.clip(current_forward - current_turn, -100, 100)
+    left  = np.clip(current_forward - current_turn, -100, 100)
     right = np.clip(current_forward + current_turn, -100, 100)
     tank(left, right)
-    print(f"L:{left:.1f} R:{right:.1f}")
+    print(f"L:{left:.1f} R:{right:.1f} | mode={'RECOVERY' if recovery_mode else 'FOLLOW'} | phase={recovery_phase if recovery_mode else '-'}")
 
-    # --- Display ---
-    cv2.putText(frame, 'FPS: {0:.2f}'.format(frame_rate_calc),
-                (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1,
-                (255, 255, 0), 2, cv2.LINE_AA)
+    # --- FPS + frame ---
+    cv2.putText(frame, f'FPS: {frame_rate_calc:.2f}', (30, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2, cv2.LINE_AA)
     cv2.imshow('Object detector', frame)
 
     # --- FPS calc ---
     t2 = cv2.getTickCount()
-    time1 = (t2 - t1) / freq
-    frame_rate_calc = 1 / time1
+    frame_rate_calc = 1 / ((t2 - t1) / freq)
 
-    # --- LiDAR plot ---
+    # --- Visualization update (lidar FOV) ---
     if laser.doProcessSimple(scan):
         xs, ys = [], []
-        cone_width = math.radians(6.0)
+        cone_width = FRONT_MARGIN
         fov_range = 3.0
         for p in scan.points:
             if ((center_angle - cone_width) <= p.angle <= (center_angle + cone_width)
-                    and 0.15 < p.range <= fov_range):
+                    and RANGE_MIN < p.range <= fov_range):
                 xs.append(p.range * math.sin(p.angle))
                 ys.append(p.range * math.cos(p.angle))
-
         lidar_points_plot.set_data(xs, ys)
-        fov_color = 'green' if a else 'red'
+        fov_color = 'green' if detected else 'red'
         left_x = [0, fov_range * math.sin(center_angle - cone_width)]
         left_y = [0, fov_range * math.cos(center_angle - cone_width)]
         right_x = [0, fov_range * math.sin(center_angle + cone_width)]
@@ -455,6 +570,3 @@ while True:
 
 cv2.destroyAllWindows()
 videostream.stop()
-
-
-

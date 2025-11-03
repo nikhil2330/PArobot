@@ -9,6 +9,8 @@ __pycache__/
 venv/
 .env/
 capstone/
+pigpio
+YDLidar-SDK
 
 # OS & editor
 .DS_Store
