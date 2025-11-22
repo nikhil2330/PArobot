@@ -2,13 +2,13 @@ from gpiozero import PWMLED, LED
 from time import sleep
 
 # Left BTS7960
-l_rpwm = PWMLED("BOARD33")   # GPIO13
-l_lpwm = PWMLED("BOARD31")   # GPIO6
+l_rpwm = PWMLED("BOARD33", frequency=200)   # GPIO13
+l_lpwm = PWMLED("BOARD31", frequency=200)   # GPIO6
 l_en   = LED("BOARD29")      # GPIO5
 
 # Right BTS7960
-r_rpwm = PWMLED("BOARD35")   # GPIO19
-r_lpwm = PWMLED("BOARD37")   # GPIO26
+r_rpwm = PWMLED("BOARD35", frequency=200)   # GPIO19
+r_lpwm = PWMLED("BOARD37", frequency=200)   # GPIO26
 r_en   = LED("BOARD32")      # GPIO12
 
 def enable_all():
