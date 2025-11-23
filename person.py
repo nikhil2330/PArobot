@@ -193,12 +193,10 @@ def detect_people(frame_rgb, imW, imH, threshold):
 # ============================
 
 def compute_color_hist(frame_rgb, bbox):
-    """
-    Compute a normalized H-S histogram for the region inside bbox.
-    Returns a (HIST_BINS x HIST_BINS) float32 array, or None if ROI invalid.
-    """
     xmin, ymin, xmax, ymax = bbox
     h, w, _ = frame_rgb.shape
+
+    # clamp
     xmin = max(0, xmin)
     ymin = max(0, ymin)
     xmax = min(w - 1, xmax)
@@ -207,11 +205,34 @@ def compute_color_hist(frame_rgb, bbox):
     if xmax <= xmin or ymax <= ymin:
         return None
 
-    roi = frame_rgb[ymin:ymax, xmin:xmax]
+    # crop to inner region to avoid background / edges
+    bw = xmax - xmin
+    bh = ymax - ymin
+    if bw < 10 or bh < 10:
+        return None  # too small, not reliable
+
+    # shrink bbox: keep central area
+    inner_xmin = int(xmin + 0.15 * bw)
+    inner_xmax = int(xmax - 0.15 * bw)
+    inner_ymin = int(ymin + 0.20 * bh)  # skip more of head/feet
+    inner_ymax = int(ymax - 0.05 * bh)
+
+    inner_xmin = max(xmin, inner_xmin)
+    inner_ymin = max(ymin, inner_ymin)
+    inner_xmax = min(xmax, inner_xmax)
+    inner_ymax = min(ymax, inner_ymax)
+
+    if inner_xmax <= inner_xmin or inner_ymax <= inner_ymin:
+        return None
+
+    roi = frame_rgb[inner_ymin:inner_ymax, inner_xmin:inner_xmax]
     if roi.size == 0:
         return None
 
-    hsv = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
+    # small blur to reduce noise
+    roi_blur = cv2.GaussianBlur(roi, (5, 5), 0)
+
+    hsv = cv2.cvtColor(roi_blur, cv2.COLOR_RGB2HSV)
 
     hist = cv2.calcHist(
         [hsv],
@@ -225,10 +246,6 @@ def compute_color_hist(frame_rgb, bbox):
 
 
 def hist_correlation(hist1, hist2):
-    """
-    Histogram correlation (cv2.compareHist).
-    Returns a float in [-1, 1]; 1 = perfect match.
-    """
     return float(cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL))
 
 

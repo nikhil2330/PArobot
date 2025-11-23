@@ -178,10 +178,6 @@ class VideoStream:
             pass
 
 
-# ============================
-# LIDAR SETUP + FUNCTIONS
-# ============================
-
 laser = None
 scan = ydlidar.LaserScan()
 
@@ -336,10 +332,6 @@ def detect_people(frame_rgb, imW, imH, threshold):
 
     return people
 
-
-# ============================
-# COLOR HISTOGRAM HELPERS
-# ============================
 
 def compute_color_hist(frame_rgb, bbox):
     xmin, ymin, xmax, ymax = bbox
