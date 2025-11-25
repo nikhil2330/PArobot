@@ -29,13 +29,15 @@ from threading import Thread
 # CONFIG / CONSTANTS
 # ============================
 
-DETECTION_THRESHOLD = 0.59   # minimum confidence for person detection
+DETECTION_THRESHOLD = 0.5   # minimum confidence for person detection
 
 LOCK_VISIBLE_TIME_SEC = 2.0  # candidate must be visible continuously for this many seconds
 MIN_HIST_FRAMES       = 5    # minimum frames used to build candidate histogram
 
 COLOR_SIM_THRESH      = 0.5  # minimum histogram correlation to accept as same person
 HIST_BINS             = 16   # H & S bins for HSV histogram
+MAX_TRACK_LOST_FRAMES = 5  # max consecutive frames allowed to lose track
+
 
 
 # ============================
@@ -376,7 +378,7 @@ def main():
                     # if not visible, we already reset above
 
                     # Draw candidate in blue
-                    if candidate_bbox is not None:
+                    if candidate_visible_this_frame and candidate_bbox is not None:
                         x1, y1, x2, y2 = candidate_bbox
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
@@ -399,7 +401,7 @@ def main():
                         print("[INFO] LOCKED onto person. This identity will not change until program exits.")
                         state_str = "LOCKED"
 
-            # ========= AFTER LOCK: track same person forever =========
+                    # ========= AFTER LOCK: track same person forever (NO re-lock) =========
             else:
                 best_match = None
                 best_sim = None
@@ -420,17 +422,25 @@ def main():
                             best_match = det
 
                 if best_match is not None:
+                    # We re-found the SAME person (by color hist)
                     tracked_bbox = best_match["bbox"]
                     tracked_score = best_match["score"]
                     tracked_lost_frames = 0
                     state_str = f"LOCKED (sim={best_sim:.2f})"
                 else:
-                    # No good match this frame -> mark LOST and clear bbox
+                    # Person not visible in this frame
                     tracked_lost_frames += 1
-                    tracked_bbox = None    # <-- IMPORTANT: no box when lost
-                    state_str = f"LOCKED_LOST ({tracked_lost_frames})"
 
-                # Draw locked person (only when we have a match) in red
+                    if tracked_lost_frames > MAX_TRACK_LOST_FRAMES:
+                        # Stop using stale bbox; robot should stop.
+                        # IMPORTANT: we DO NOT reset tracked_active.
+                        tracked_bbox = None
+                        state_str = f"LOCKED_LOST_STOP ({tracked_lost_frames})"
+                    else:
+                        # Short "grace" phase where we still use last bbox
+                        state_str = f"LOCKED_LOST ({tracked_lost_frames})"
+
+                # Draw locked person (only when we have a CURRENT match) in red
                 if tracked_bbox is not None:
                     x1, y1, x2, y2 = tracked_bbox
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
@@ -444,6 +454,7 @@ def main():
                         (0, 0, 255),
                         2,
                     )
+
 
             # ========= FPS + TIME OVERLAYS =========
             t2 = cv2.getTickCount()

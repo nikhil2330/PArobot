@@ -40,11 +40,13 @@ INV_LEFT  = False
 INV_RIGHT = False
 
 # Detection / lock-on thresholds
-DETECTION_THRESHOLD   = 0.59  # min confidence for person class
+DETECTION_THRESHOLD   = 0.5  # min confidence for person class
 LOCK_VISIBLE_TIME_SEC = 2.0   # must be continuously visible this long
-MIN_HIST_FRAMES       = 10    # minimum frames to build histogram
+MIN_HIST_FRAMES       = 5     # minimum frames to build histogram
 COLOR_SIM_THRESH      = 0.5   # histogram correlation threshold (0..1)
 HIST_BINS             = 16    # H/S histogram bins
+
+MAX_TRACK_LOST_FRAMES = 5  # max consecutive frames allowed to lose track
 
 
 SERIAL_PORT = "/dev/ttyUSB1" 
@@ -605,6 +607,7 @@ def main():
                         candidate_visible_this_frame = False
                         candidate_visible_start_t = None
                         candidate_visible_time = 0.0
+                        
                         state_str = "CANDIDATE_NOT_VISIBLE"
 
                     # Continuous visibility timing
@@ -616,7 +619,7 @@ def main():
                             candidate_visible_time = now - candidate_visible_start_t
 
                     # Draw candidate bbox (blue)
-                    if candidate_bbox is not None:
+                    if candidate_visible_this_frame and candidate_bbox is not None:
                         x1, y1, x2, y2 = candidate_bbox
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
@@ -661,8 +664,13 @@ def main():
                     state_str = f"LOCKED (sim={best_sim:.2f})"
                 else:
                     tracked_lost_frames += 1
-                    tracked_bbox = None
-                    state_str = f"LOCKED_LOST ({tracked_lost_frames})"
+                    if tracked_lost_frames > MAX_TRACK_LOST_FRAMES:
+                        # Stop using stale bbox so robot stops moving.
+                        # DO NOT reset tracked_active → no re-locking.
+                        tracked_bbox = None
+                        state_str = f"LOCKED_LOST_STOP ({tracked_lost_frames})"
+                    else:
+                        state_str = f"LOCKED_LOST ({tracked_lost_frames})"
 
                 if tracked_bbox is not None:
                     x1, y1, x2, y2 = tracked_bbox
