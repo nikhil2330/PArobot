@@ -36,42 +36,42 @@ import time
 from picamera2 import Picamera2
 
 
-# SERIAL_PORT = "/dev/ttyUSB1"   # change to /dev/ttyUSB0 or whatever your Arduino shows
-# BAUD_RATE = 9600
+SERIAL_PORT = "/dev/ttyUSB1"   # change to /dev/ttyUSB0 or whatever your Arduino shows
+BAUD_RATE = 9600
 
-# try:
-#     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.01)
-#     print(f"[RF] Opened serial port {SERIAL_PORT}")
-# except Exception as e:
-#     print(f"[RF] Could not open serial port {SERIAL_PORT}: {e}")
-#     ser = None  # run without RF if serial fails
+try:
+    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.01)
+    print(f"[RF] Opened serial port {SERIAL_PORT}")
+except Exception as e:
+    print(f"[RF] Could not open serial port {SERIAL_PORT}: {e}")
+    ser = None  # run without RF if serial fails
 
-# robot_enabled = False  # start in STOP mode
+robot_enabled = False  # start in STOP mode
 
 # #song = AudioSegment.from_mp3("person.mp3")
 
-# def rf_serial():
-#     global robot_enabled
-#     if ser is None:
-#         return
+def rf_serial():
+    global robot_enabled
+    if ser is None:
+        return
 
-#     try:
-#         while ser.in_waiting:
-#             line = ser.readline().decode("utf-8", errors="ignore").strip()
-#             if not line:
-#                 continue
+    try:
+        while ser.in_waiting:
+            line = ser.readline().decode("utf-8", errors="ignore").strip()
+            if not line:
+                continue
 
-#             print(f"[RF] {line}")
-#             if line == "START":
-#                 robot_enabled = True
-#                 reset_motion_state() 
-#                 print("[RF] Robot ENABLED (follow mode)")
-#             elif line == "STOP":
-#                 robot_enabled = False
-#                 reset_motion_state() 
-#                 print("[RF] Robot DISABLED (motors stopped)")
-#     except Exception as e:
-#         print(f"[RF] Serial error: {e}")
+            print(f"[RF] {line}")
+            if line == "START":
+                robot_enabled = True
+                reset_motion_state() 
+                print("[RF] Robot ENABLED (follow mode)")
+            elif line == "STOP":
+                robot_enabled = False
+                reset_motion_state() 
+                print("[RF] Robot DISABLED (motors stopped)")
+    except Exception as e:
+        print(f"[RF] Serial error: {e}")
 
 # Left BTS7960
 l_rpwm = PWMLED("BOARD33", frequency=200)  # GPIO13 -> RPWM (Left)
@@ -314,28 +314,28 @@ ax.legend(loc="upper right")
 # --- CONTROL & BEHAVIOR CONSTANTS ---------------------------------------------
 
 # --- Motion & turning ---
-turn = 30                     # max turning PWM output (0..100)  ### NEW slightly gentler cap
+turn = 30                     # max turning PWM output (0..100)  slightly gentler cap
 forward_speed = 38            # max forward PWM output (0..100)
 
 # --- Behavior tuning ---
 accel_rate_fwd  = 36.0        # forward ramp (PWM units/sec)
 
 # Asymmetric turn ramps: slow to spool up, FAST to brake/stop
-accel_rate_turn_up    = 22.0  # ramp when |target| is growing (gentle)      ### NEW
-accel_rate_turn_down  = 150.0 # ramp when braking / sign change (quick)     ### NEW
+accel_rate_turn_up    = 22.0  # ramp when |target| is growing (gentle)      
+accel_rate_turn_down  = 150.0 # ramp when braking / sign change (quick)     
 
 alpha = 0.30                  # smoothing factor for person x-position (0-1)
 dead_zone_ratio = 0.18        # keep modest; do NOT increase dead-zone itself
-turn_sensitivity = 0.80       # proportional gain (slightly gentler)        ### NEW
-turn_D = 0.22                 # derivative gain (more damping)               ### NEW
+turn_sensitivity = 0.80       # proportional gain (slightly gentler)        
+turn_D = 0.22                 # derivative gain (more damping)               
 turn_hysteresis = 0.05        # tiny hysteresis band to avoid instant sign flip
-zero_cross_band = 0.08        # extra brake band around center (helps weave) ### NEW
+zero_cross_band = 0.08        # extra brake band around center (helps weave) 
 
 # Bias knobs to fix “pulls right/left”
-CENTER_BIAS_PX = 0.0          # +ve shifts neutral point to the RIGHT (pixels) ### NEW
-TURN_BIAS      = 0.0          # added to target_turn in PWM units (e.g., -2)    ### NEW
-LEFT_GAIN      = 1.00         # scale left side output (1.00 = no change)       ### NEW
-RIGHT_GAIN     = 1.00         # scale right side output                         ### NEW
+CENTER_BIAS_PX = 0.0          # +ve shifts neutral point to the RIGHT (pixels) 
+TURN_BIAS      = 0.0          # added to target_turn in PWM units (e.g., -2)    
+LEFT_GAIN      = 1.00         # scale left side output (1.00 = no change)       
+RIGHT_GAIN     = 1.00         # scale right side output                         
 
 lost_timeout = 1.0            # sec - how long to remember last seen person (bbox reuse)
 
@@ -356,7 +356,7 @@ SIDE_SPREAD  = math.radians(40.0)
 
 # --- Initialization for motion state ---
 last_update = time.time()
-last_ctrl_time = last_update   # separate timestamp for controller dt         ### NEW
+last_ctrl_time = last_update   # separate timestamp for controller dt         
 current_forward = 0.0
 current_turn = 0.0
 
@@ -375,8 +375,7 @@ last_seen_time = 0.0
 last_seen_angle = 0.0
 last_seen_dist = 1.0
 
-# --- Simple Search Mode (replaces recovery) ---
-SEARCH_SPIN_TURN = 8         # SLOWER spin as requested                      ### NEW (was 16)
+SEARCH_SPIN_TURN = 8         # SLOWER spin as requested                      
 SEARCH_FLIP_SEC  = 6.0        # flip spin direction every N seconds
 STOP_PAUSE_SEC   = 1.5        # stand still before spinning
 search_mode = False
@@ -450,7 +449,7 @@ try:
     while True:
         frame_count += 1
         t1 = cv2.getTickCount()
-        # rf_serial()
+        rf_serial()
 
         frame1 = videostream.read()
         if frame1 is None:
@@ -519,7 +518,7 @@ try:
                 search_start = now
                 scan_dir = 1 if last_seen_angle >= 0 else -1
         # Compute aim angle (either current detected center or last seen)
-        frame_center = (imW / 2.0) + CENTER_BIAS_PX   # ### NEW bias to fix camera offset
+        frame_center = (imW / 2.0) + CENTER_BIAS_PX   # bias to fix camera offset
         center_angle_temp = 0.0
         if detected:
             x_center = (xmin + xmax) / 2.0
@@ -540,170 +539,160 @@ try:
         # NORMAL FOLLOW (person visible and NOT searching)
         # =====================================================================
 
-        # if robot_enabled:
-        print("on")
-        if detected and not search_mode:
-            # smooth x tracking
-            smooth_x = x if smooth_x is None else (alpha * x + (1 - alpha) * smooth_x)
+        if robot_enabled:
+            print("on")
+            if detected and not search_mode:
+                # smooth x tracking
+                smooth_x = x if smooth_x is None else (alpha * x + (1 - alpha) * smooth_x)
 
-            frame_center = (imW / 2.0) + CENTER_BIAS_PX
-            error_ratio = (smooth_x - frame_center) / frame_center  # [-1..1]
+                frame_center = (imW / 2.0) + CENTER_BIAS_PX
+                error_ratio = (smooth_x - frame_center) / frame_center  # [-1..1]
 
-            # modest dead-zone: do nothing very near center
-            if abs(error_ratio) < dead_zone_ratio:
-                target_turn = 0.0
-                prev_error = 0.0
-            else:
-                # zero-cross short brake: if crossing near center, command zero
-                dt_ctrl = max(1e-3, now - last_ctrl_time)   # ### NEW: dedicated controller dt
-                last_ctrl_time = now
-
-                if (np.sign(error_ratio) != np.sign(prev_error)) and (abs(error_ratio) < zero_cross_band):
+                # modest dead-zone: do nothing very near center
+                if abs(error_ratio) < dead_zone_ratio:
                     target_turn = 0.0
+                    prev_error = 0.0
                 else:
-                    # PD turn control (damped) + slight nonlinearity: less gain near center
-                    d_error = (error_ratio - prev_error) / dt_ctrl
-                    d_error = float(np.clip(d_error, -6.0, 6.0))   # clamp derivative
-                    prev_error = error_ratio
-                    near_center_scale = 0.6 + 0.4 * abs(error_ratio)  # 0.6..1.0  ### NEW
-                    kP = turn_sensitivity * near_center_scale
-                    target_turn = np.clip(
-                        -turn * (kP * error_ratio + turn_D * d_error),
-                        -turn, turn
-                    )
+                    # zero-cross short brake: if crossing near center, command zero
+                    dt_ctrl = max(1e-3, now - last_ctrl_time)   # : dedicated controller dt
+                    last_ctrl_time = now
 
-            # follow distance band
-            if front_distance is not None:
-                last_seen_dist = front_distance  # remember
-                if front_distance > FOLLOW_FAR:
-                    target_forward = forward_speed
-                elif front_distance < FOLLOW_NEAR:
-                    target_forward = -forward_speed
-                else:
+                    if (np.sign(error_ratio) != np.sign(prev_error)) and (abs(error_ratio) < zero_cross_band):
+                        target_turn = 0.0
+                    else:
+                        # PD turn control (damped) + slight nonlinearity: less gain near center
+                        d_error = (error_ratio - prev_error) / dt_ctrl
+                        d_error = float(np.clip(d_error, -6.0, 6.0))   # clamp derivative
+                        prev_error = error_ratio
+                        near_center_scale = 0.6 + 0.4 * abs(error_ratio)  # 0.6..1.0  
+                        kP = turn_sensitivity * near_center_scale
+                        target_turn = np.clip(
+                            -turn * (kP * error_ratio + turn_D * d_error),
+                            -turn, turn
+                        )
+
+                # follow distance band
+                if front_distance is not None:
+                    last_seen_dist = front_distance  # remember
+                    if front_distance > FOLLOW_FAR:
+                        target_forward = forward_speed
+                    elif front_distance < FOLLOW_NEAR:
+                        target_forward = -forward_speed
+                    else:
+                        target_forward = 0.0
+
+                # obstacle shaping
+                avoid_turn, allow_forward = 0.0, 1.0
+                if left_min  and left_min  < SIDE_WARN: avoid_turn += 0.5
+                if right_min and right_min < SIDE_WARN: avoid_turn -= 0.5
+                if (left_min and left_min < SIDE_STOP) or (right_min and right_min < SIDE_STOP):
+                    allow_forward = 0.0
+
+                target_turn    += avoid_turn * turn
+                target_turn    += TURN_BIAS                      # static turn bias
+                target_forward *= allow_forward
+
+                # predictive braking
+                if (prev_dist is not None) and (front_distance is not None):
+                    rate = (prev_dist - front_distance) / max(1e-3, (now - last_update))
+                    if rate > CLOSE_RATE:
+                        target_forward *= max(0.0, 1.0 - rate)
+                prev_dist = front_distance
+
+            elif search_mode:
+                elapsed = now - search_start
+                if search_stage == 0:
+                    # stop & wait briefly
                     target_forward = 0.0
+                    target_turn = 0.0
+                    if elapsed >= STOP_PAUSE_SEC:
+                        search_stage = 1
+                        search_start = now
+                elif search_stage == 1:
+                    # slow 360 spin; flip direction periodically
+                    target_forward = 0.0
+                    target_turn = scan_dir * SEARCH_SPIN_TURN
+                    if elapsed >= SEARCH_FLIP_SEC:
+                        scan_dir *= -1
+                        search_start = now
 
-            # obstacle shaping
-            avoid_turn, allow_forward = 0.0, 1.0
-            if left_min  and left_min  < SIDE_WARN: avoid_turn += 0.5
-            if right_min and right_min < SIDE_WARN: avoid_turn -= 0.5
-            if (left_min and left_min < SIDE_STOP) or (right_min and right_min < SIDE_STOP):
-                allow_forward = 0.0
+            dt_loop = now - last_update
+            last_update = now
 
-            target_turn    += avoid_turn * turn
-            target_turn    += TURN_BIAS                      # ### NEW: static turn bias
-            target_forward *= allow_forward
+            ramp_step_fwd       = accel_rate_fwd        * dt_loop
+            ramp_step_turn_up   = accel_rate_turn_up    * dt_loop
+            ramp_step_turn_down = accel_rate_turn_down  * dt_loop
 
-            # predictive braking
-            if (prev_dist is not None) and (front_distance is not None):
-                rate = (prev_dist - front_distance) / max(1e-3, (now - last_update))
-                if rate > CLOSE_RATE:
-                    target_forward *= max(0.0, 1.0 - rate)
-            prev_dist = front_distance
+            def ramp(current, target, step):
+                if current < target: return min(current + step, target)
+                if current > target: return max(current - step, target)
+                return current
 
-        # =====================================================================
-        # SIMPLE SEARCH (replaces recovery)
-        # =====================================================================
-        elif search_mode:
-            elapsed = now - search_start
-            if search_stage == 0:
-                # stop & wait briefly
-                target_forward = 0.0
-                target_turn = 0.0
-                if elapsed >= STOP_PAUSE_SEC:
-                    search_stage = 1
-                    search_start = now
-            elif search_stage == 1:
-                # slow 360 spin; flip direction periodically
-                target_forward = 0.0
-                target_turn = scan_dir * SEARCH_SPIN_TURN
-                if elapsed >= SEARCH_FLIP_SEC:
-                    scan_dir *= -1
-                    search_start = now
+            def ramp_asym_turn(current, target, step_up, step_down):
+                # If magnitude is increasing on same sign → use step_up
+                same_sign = (np.sign(current) == np.sign(target)) or (current == 0) or (target == 0)
+                if same_sign and abs(target) > abs(current):
+                    step = step_up
+                else:
+                    # braking or sign change → step_down (faster)
+                    step = step_down
+                if current < target: return min(current + step, target)
+                if current > target: return max(current - step, target)
+                return current
 
-        # =====================================================================
-        # SMOOTH ACCEL + DRIVE (with asymmetric turn ramps)
-        # =====================================================================
-        dt_loop = now - last_update
-        last_update = now
+            current_forward = ramp(current_forward, target_forward, ramp_step_fwd)
+            current_turn    = ramp_asym_turn(current_turn, target_turn, ramp_step_turn_up, ramp_step_turn_down)
 
-        ramp_step_fwd       = accel_rate_fwd        * dt_loop
-        ramp_step_turn_up   = accel_rate_turn_up    * dt_loop
-        ramp_step_turn_down = accel_rate_turn_down  * dt_loop
+            left  = np.clip(current_forward - current_turn, -100, 100)
+            right = np.clip(current_forward + current_turn, -100, 100)
 
-        def ramp(current, target, step):
-            if current < target: return min(current + step, target)
-            if current > target: return max(current - step, target)
-            return current
+            left  = np.clip(left  * LEFT_GAIN,  -100, 100)
+            right = np.clip(right * RIGHT_GAIN, -100, 100)
 
-        def ramp_asym_turn(current, target, step_up, step_down):
-            # If magnitude is increasing on same sign → use step_up
-            same_sign = (np.sign(current) == np.sign(target)) or (current == 0) or (target == 0)
-            if same_sign and abs(target) > abs(current):
-                step = step_up
-            else:
-                # braking or sign change → step_down (faster)
-                step = step_down
-            if current < target: return min(current + step, target)
-            if current > target: return max(current - step, target)
-            return current
+            tank(left, right)
+            print(f"L:{left:.1f} R:{right:.1f} | mode={'SEARCH' if search_mode else 'FOLLOW'} | stage={search_stage if search_mode else '-'} | fd={front_distance} lm={left_min} rm={right_min}")
 
-        current_forward = ramp(current_forward, target_forward, ramp_step_fwd)
-        current_turn    = ramp_asym_turn(current_turn, target_turn, ramp_step_turn_up, ramp_step_turn_down)
+            cv2.putText(frame, f'FPS: {frame_rate_calc:.2f}', (30, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2, cv2.LINE_AA)
+            cv2.imshow('Object detector', frame)
 
-        left  = np.clip(current_forward - current_turn, -100, 100)
-        right = np.clip(current_forward + current_turn, -100, 100)
+            t2 = cv2.getTickCount()
+            frame_rate_calc = 1 / ((t2 - t1) / freq)
 
-        # Per-side gain to correct “stronger right/left” drivetrains            ### NEW
-        left  = np.clip(left  * LEFT_GAIN,  -100, 100)
-        right = np.clip(right * RIGHT_GAIN, -100, 100)
+            if laser.doProcessSimple(scan):
+                xs, ys = [], []
+                cone_width = FRONT_MARGIN
+                fov_range = 3.0
+                for p in scan.points:
+                    if ((center_angle - cone_width) <= p.angle <= (center_angle + cone_width)
+                            and RANGE_MIN < p.range <= fov_range):
+                        xs.append(p.range * math.sin(p.angle))
+                        ys.append(p.range * math.cos(p.angle))
+                lidar_points_plot.set_data(xs, ys)
+                fov_color = 'green' if detected else 'red'
+                left_x = [0, fov_range * math.sin(center_angle - cone_width)]
+                left_y = [0, fov_range * math.cos(center_angle - cone_width)]
+                right_x = [0, fov_range * math.sin(center_angle + cone_width)]
+                right_y = [0, fov_range * math.cos(center_angle + cone_width)]
+                cone_fill_x = [0,
+                            fov_range * math.sin(center_angle - cone_width),
+                            fov_range * math.sin(center_angle + cone_width)]
+                cone_fill_y = [0,
+                            fov_range * math.cos(center_angle - cone_width),
+                            fov_range * math.cos(center_angle + cone_width)]
+                fov_fill.set_xy(np.column_stack((cone_fill_x, cone_fill_y)))
+                fov_fill.set_facecolor(fov_color)
+                fov_left_line.set_data(left_x, left_y)
+                fov_right_line.set_data(right_x, right_y)
+                fov_left_line.set_color(fov_color)
+                fov_right_line.set_color(fov_color)
+                fig.canvas.draw()
+                fig.canvas.flush_events()
 
-        tank(left, right)
-        print(f"L:{left:.1f} R:{right:.1f} | mode={'SEARCH' if search_mode else 'FOLLOW'} | stage={search_stage if search_mode else '-'} | fd={front_distance} lm={left_min} rm={right_min}")
-
-        # --- FPS + frame ---
-        cv2.putText(frame, f'FPS: {frame_rate_calc:.2f}', (30, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2, cv2.LINE_AA)
-        cv2.imshow('Object detector', frame)
-
-        # # --- FPS calc ---
-        t2 = cv2.getTickCount()
-        frame_rate_calc = 1 / ((t2 - t1) / freq)
-
-        # --- Visualization update (lidar FOV) ---
-        if laser.doProcessSimple(scan):
-            xs, ys = [], []
-            cone_width = FRONT_MARGIN
-            fov_range = 3.0
-            for p in scan.points:
-                if ((center_angle - cone_width) <= p.angle <= (center_angle + cone_width)
-                        and RANGE_MIN < p.range <= fov_range):
-                    xs.append(p.range * math.sin(p.angle))
-                    ys.append(p.range * math.cos(p.angle))
-            lidar_points_plot.set_data(xs, ys)
-            fov_color = 'green' if detected else 'red'
-            left_x = [0, fov_range * math.sin(center_angle - cone_width)]
-            left_y = [0, fov_range * math.cos(center_angle - cone_width)]
-            right_x = [0, fov_range * math.sin(center_angle + cone_width)]
-            right_y = [0, fov_range * math.cos(center_angle + cone_width)]
-            cone_fill_x = [0,
-                           fov_range * math.sin(center_angle - cone_width),
-                           fov_range * math.sin(center_angle + cone_width)]
-            cone_fill_y = [0,
-                           fov_range * math.cos(center_angle - cone_width),
-                           fov_range * math.cos(center_angle + cone_width)]
-            fov_fill.set_xy(np.column_stack((cone_fill_x, cone_fill_y)))
-            fov_fill.set_facecolor(fov_color)
-            fov_left_line.set_data(left_x, left_y)
-            fov_right_line.set_data(right_x, right_y)
-            fov_left_line.set_color(fov_color)
-            fov_right_line.set_color(fov_color)
-            fig.canvas.draw()
-            fig.canvas.flush_events()
-
-        if cv2.waitKey(1) == ord('q'):
-            break
-        # else:
-        #     reset_motion_state()
+            if cv2.waitKey(1) == ord('q'):
+                break
+        else:
+            reset_motion_state()
 
 finally:
     # Clean shutdown
