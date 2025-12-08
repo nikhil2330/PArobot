@@ -20,15 +20,15 @@ from threading import Thread
 CAMERA_FOV_DEG = 60.0  # camera fov
 CAMERA_FOV_RAD = math.radians(CAMERA_FOV_DEG)
 
-TURN_SPEED_TARGET    = 30.0   # target turn speed (percent)
-FORWARD_SPEED_TARGET = 35.0   # target linear speed (percent)
+TURN_SPEED_TARGET    = 25.0   # target turn speed (percent)
+FORWARD_SPEED_TARGET = 30.0   # target linear speed (percent)
 CENTER_DEADZONE      = 0.10   # value where side to side jitter decreases
 
-ACCEL_LINEAR = 100.0   # how fast forward/back can change (percent/sec)
-ACCEL_TURN   = 100.0   # how fast turn can change (percent/sec)
+ACCEL_LINEAR = 200.0   # how fast forward/back can change (percent/sec)
+ACCEL_TURN   = 200.0   # how fast turn can change (percent/sec)
 
-FOLLOW_NEAR = 1.1      # too close -> back up
-FOLLOW_FAR  = 1.6      # too far   -> go forward
+FOLLOW_NEAR = 0.8      # too close -> back up
+FOLLOW_FAR  = 1.5      # too far   -> go forward
 
 RANGE_MIN      = 0.15
 RANGE_MAX      = 5.00
@@ -43,7 +43,7 @@ INV_RIGHT = False
 DETECTION_THRESHOLD   = 0.5  # min confidence for person class
 LOCK_VISIBLE_TIME_SEC = 2.0   # must be continuously visible this long
 MIN_HIST_FRAMES       = 5     # minimum frames to build histogram
-COLOR_SIM_THRESH      = 0.3   # histogram correlation threshold (0..1)
+COLOR_SIM_THRESH      = 0.5   # histogram correlation threshold (0..1)
 HIST_BINS             = 16    # H/S histogram bins
 
 MAX_TRACK_LOST_FRAMES = 5  # max consecutive frames allowed to lose track
@@ -488,12 +488,12 @@ def main():
 
     print("Initializing TFLite model...")
     init_tflite(args.modeldir, args.graph, args.labels, use_tpu=args.edgetpu)
-
+ 
     print("Initializing LiDAR...")
     init_lidar(port="/dev/ttyUSB0", baud=115200)
 
     print("Initializing plots...")
-    init_plot()
+    #init_plot()
 
     print("Starting Picamera2 stream...")
     videostream = VideoStream(resolution=(imW, imH), framerate=30)
@@ -848,9 +848,9 @@ def main():
                     2,
                 )
 
-            update_plot(aim_angle, xs, ys, has_lock_and_bbox)
+            #update_plot(aim_angle, xs, ys, has_lock_and_bbox)
 
-            cv2.imshow("Person Follow + Lock", frame)
+            #cv2.imshow("Person Follow + Lock", frame)
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
