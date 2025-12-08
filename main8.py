@@ -20,15 +20,15 @@ from threading import Thread
 CAMERA_FOV_DEG = 60.0  # camera fov
 CAMERA_FOV_RAD = math.radians(CAMERA_FOV_DEG)
 
-TURN_SPEED_TARGET    = 25.0   # target turn speed (percent)
-FORWARD_SPEED_TARGET = 30.0   # target linear speed (percent)
+TURN_SPEED_TARGET    = 30.0   # target turn speed (percent)
+FORWARD_SPEED_TARGET = 35.0   # target linear speed (percent)
 CENTER_DEADZONE      = 0.10   # value where side to side jitter decreases
 
-ACCEL_LINEAR = 200.0   # how fast forward/back can change (percent/sec)
-ACCEL_TURN   = 200.0   # how fast turn can change (percent/sec)
+ACCEL_LINEAR = 90.0   # how fast forward/back can change (percent/sec)
+ACCEL_TURN   = 90.0   # how fast turn can change (percent/sec)
 
-FOLLOW_NEAR = 0.8      # too close -> back up
-FOLLOW_FAR  = 1.5      # too far   -> go forward
+FOLLOW_NEAR = 1.1      # too close -> back up
+FOLLOW_FAR  = 1.6      # too far   -> go forward
 
 RANGE_MIN      = 0.15
 RANGE_MAX      = 5.00
