@@ -27,13 +27,16 @@ CENTER_DEADZONE      = 0.10   # value where side to side jitter decreases
 ACCEL_LINEAR = 90.0   # how fast forward/back can change (percent/sec)
 ACCEL_TURN   = 90.0   # how fast turn can change (percent/sec)
 
-FOLLOW_NEAR = 1.1      # too close -> back up
-FOLLOW_FAR  = 1.6      # too far   -> go forward
+FOLLOW_NEAR = 0.8      # too close -> back up
+FOLLOW_FAR  = 1.3      # too far   -> go forward
 
 RANGE_MIN      = 0.15
 RANGE_MAX      = 5.00
 CONE_HALF_W    = math.radians(6.0)   # LiDAR cone half-width around aim angle
 PLOT_MAX_RANGE = 4.0                 # max range to show in LiDAR plot
+
+TURN_KP = 60.0          # max turn percent at full screen offset (tune 40..90)
+MIN_INNER_RATIO = 0.35  # inner wheel keeps at least 35% of forward (tune 0.25..0.6)
 
 # Motor inversion flags
 INV_LEFT  = False
@@ -463,6 +466,34 @@ def smooth(prev, target, accel_per_sec, dt):
     delta = np.clip(target - prev, -max_step, +max_step)
     return prev + delta
 
+def compute_turn_cmd(offset_norm):
+    # deadzone
+    if abs(offset_norm) < CENTER_DEADZONE:
+        return 0.0
+    # proportional
+    err = float(np.clip(offset_norm, -1.0, 1.0))
+    return -TURN_KP * err   # sign: person right -> turn right (adjust if backwards)
+
+def mix_tanky(forward, turn, min_inner_ratio=MIN_INNER_RATIO):
+    left  = forward - turn
+    right = forward + turn
+
+    # normalize so neither exceeds 100 while preserving ratio
+    m = max(100.0, abs(left), abs(right))
+    left  = left  * 100.0 / m
+    right = right * 100.0 / m
+
+    # enforce minimum inner wheel when moving
+    if abs(forward) > 5.0 and abs(turn) > 5.0:
+        min_inner = min_inner_ratio * abs(forward)
+        if abs(left) < abs(right):
+            if abs(left) < min_inner:
+                left = math.copysign(min_inner, left)
+        else:
+            if abs(right) < min_inner:
+                right = math.copysign(min_inner, right)
+
+    return float(np.clip(left, -100, 100)), float(np.clip(right, -100, 100))
 
 
 def main():
@@ -715,12 +746,7 @@ def main():
 
                 aim_angle = offset_norm * (CAMERA_FOV_RAD / 2.0)
 
-                if offset_norm < -CENTER_DEADZONE:
-                    target_turn_cmd = +TURN_SPEED_TARGET
-                elif offset_norm > +CENTER_DEADZONE:
-                    target_turn_cmd = -TURN_SPEED_TARGET
-                else:
-                    target_turn_cmd = 0.0
+                target_turn_cmd = compute_turn_cmd(offset_norm)
 
             front_distance, xs, ys = read_lidar_cone(aim_angle)
 
@@ -755,8 +781,7 @@ def main():
                 forward_cmd = smooth(forward_cmd, target_forward_cmd, ACCEL_LINEAR, dt)
                 turn_cmd    = smooth(turn_cmd,    target_turn_cmd,   ACCEL_TURN,   dt)
 
-                left  = np.clip(forward_cmd - turn_cmd, -100, 100)
-                right = np.clip(forward_cmd + turn_cmd, -100, 100)
+                left, right = mix_tanky(forward_cmd, turn_cmd)
                 tank(left, right)
 
                 motion_str = ""
