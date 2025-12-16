@@ -56,7 +56,7 @@ OBS_AVOID_DIST     = 0.90   # obstacle distance threshold (m)
 OBS_BIAS_TURN      = 25.0   # how hard to turn
 OBS_MIN_PTS        = 8      # min points to count as obstacle
 
-REACQUIRE_TIME_SEC = 1.2    # max time to tank-turn while searching (s)
+REACQUIRE_TIME_SEC = 1.0    # max time to tank-turn while searching (s)
 REACQUIRE_TURN_MAX = 25.0   # cap turn during reacquire (percent)
 
 OBS_SECTOR_HALF_W = math.radians(60.0)  # scan front +/-60deg (120deg total)
