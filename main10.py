@@ -28,7 +28,7 @@ ACCEL_LINEAR = 80.0   # how fast forward/back can change (percent/sec)
 ACCEL_TURN   = 70.0   # how fast turn can change (percent/sec)
 
 FOLLOW_NEAR = 1.0      # too close -> back up
-FOLLOW_FAR  = 1.3     # too far   -> go forward
+FOLLOW_FAR  = 1.3      # too far   -> go forward
 
 RANGE_MIN      = 0.15
 RANGE_MAX      = 5.00
@@ -51,8 +51,19 @@ HIST_BINS             = 16    # H/S histogram bins
 
 MAX_TRACK_LOST_FRAMES = 5  # max consecutive frames allowed to lose track
 
+# Obstacle
+OBS_AVOID_DIST     = 0.90   # obstacle distance threshold (m)
+OBS_BIAS_TURN      = 25.0   # how hard to turn
+OBS_MIN_PTS        = 8      # min points to count as obstacle
 
-SERIAL_PORT = "/dev/ttyUSB1" 
+REACQUIRE_TIME_SEC = 1.2    # max time to tank-turn while searching (s)
+REACQUIRE_TURN_MAX = 25.0   # cap turn during reacquire (percent)
+
+OBS_SECTOR_HALF_W = math.radians(60.0)  # scan front +/-60deg (120deg total)
+OBS_IGNORE_HALF_W = CONE_HALF_W + math.radians(9.0)   # ignore +/-9deg around aim_angle (person wedge)
+
+
+SERIAL_PORT = "/dev/ttyUSB1"
 BAUD_RATE   = 9600
 
 try:
@@ -214,6 +225,7 @@ def shutdown_lidar():
         pass
 
 
+# --- ORIGINAL: keep this exactly (even if we don’t call it anymore) ---
 def read_lidar_cone(aim_angle, cone_half_width=CONE_HALF_W, plot_max_range=PLOT_MAX_RANGE):
     if laser is None:
         return None, [], []
@@ -234,6 +246,73 @@ def read_lidar_cone(aim_angle, cone_half_width=CONE_HALF_W, plot_max_range=PLOT_
 
     front_distance = np.median(distances) if distances else None
     return front_distance, xs, ys
+
+
+def read_lidar_follow_and_obstacles(aim_angle_for_ignore, have_person):
+    """
+    Coordinate assumption (matches your plot math):
+      angle = 0  -> straight ahead (+Y)
+      angle > 0  -> to robot RIGHT (+X)
+      angle < 0  -> to robot LEFT (-X)
+    """
+    if laser is None:
+        return None, [], [], [], [], 0, 0, None
+
+    if not laser.doProcessSimple(scan):
+        return None, [], [], [], [], 0, 0, None
+
+    # Follow cone (for distance control)
+    follow_distances = []
+    follow_xs, follow_ys = [], []
+
+    # Obstacle sector (for avoidance)
+    obs_xs, obs_ys = [], []
+    obs_left_ct = 0
+    obs_right_ct = 0
+    obs_min_dist = None  # min of "close" obstacle points (<= OBS_AVOID_DIST)
+
+    for p in scan.points:
+        r = p.range
+        a = p.angle
+
+        if not (RANGE_MIN < r <= RANGE_MAX):
+            continue
+
+        # Convert to plot coords (your original math)
+        x = r * math.sin(a)
+        y = r * math.cos(a)
+
+        # ---- Follow cone (around aim_angle) ----
+        if (aim_angle_for_ignore - CONE_HALF_W) <= a <= (aim_angle_for_ignore + CONE_HALF_W):
+            follow_distances.append(r)
+            if r <= PLOT_MAX_RANGE:
+                follow_xs.append(x)
+                follow_ys.append(y)
+
+        # ---- Obstacle sector (front +/-60deg) ----
+        if (-OBS_SECTOR_HALF_W) <= a <= (+OBS_SECTOR_HALF_W):
+            # Ignore “person wedge” around aim_angle so person cluster isn’t treated as obstacle
+            if have_person and (abs(a - aim_angle_for_ignore) <= OBS_IGNORE_HALF_W):
+                continue
+
+            # points for plotting obstacle sector
+            if r <= PLOT_MAX_RANGE:
+                obs_xs.append(x)
+                obs_ys.append(y)
+
+            # points for triggering obstacle
+            if r <= OBS_AVOID_DIST:
+                if obs_min_dist is None or r < obs_min_dist:
+                    obs_min_dist = r
+
+                # Side classification: x>0 is RIGHT (angle>0), x<0 is LEFT
+                if x >= 0:
+                    obs_right_ct += 1
+                else:
+                    obs_left_ct += 1
+
+    front_distance = np.median(follow_distances) if follow_distances else None
+    return front_distance, follow_xs, follow_ys, obs_xs, obs_ys, obs_left_ct, obs_right_ct, obs_min_dist
 
 
 
@@ -398,13 +477,14 @@ def hist_correlation(hist1, hist2):
 fig = None
 ax = None
 lidar_points_plot = None
+obs_points_plot = None  # NEW (overlay, does not remove old plot)
 fov_fill = None
 fov_left_line = None
 fov_right_line = None
 
 
 def init_plot():
-    global fig, ax, lidar_points_plot, fov_fill, fov_left_line, fov_right_line
+    global fig, ax, lidar_points_plot, obs_points_plot, fov_fill, fov_left_line, fov_right_line
     plt.ion()
     fig, ax = plt.subplots()
     ax.set_aspect("equal")
@@ -412,9 +492,15 @@ def init_plot():
     ax.set_ylim(0.0, 3.0)
     ax.grid(True)
 
+    # OLD plot (kept): follow-cone points
     lidar_points_plot, = ax.plot([], [], ".", markersize=3, label="LiDAR points")
+
+    # NEW overlay: obstacle-sector points
+    obs_points_plot,    = ax.plot([], [], ".", markersize=3, label="Obstacle sector")
+
     ax.plot(0, 0, "ro", markersize=6, label="Robot")
 
+    # OLD fill (kept): follow cone fill
     fov_fill = ax.fill([], [], "orange", alpha=0.2, label="LiDAR cone")[0]
     fov_left_line,  = ax.plot([], [], "orange", linewidth=1.5)
     fov_right_line, = ax.plot([], [], "orange", linewidth=1.5)
@@ -422,10 +508,16 @@ def init_plot():
     ax.legend(loc="upper right")
 
 
-def update_plot(aim_angle, xs, ys, detected):
+def update_plot(aim_angle, xs, ys, detected, obs_xs=None, obs_ys=None, obstacle_now=False):
+    """
+    Backwards-compatible:
+      - old calls: update_plot(aim_angle, xs, ys, detected)
+      - new calls: update_plot(..., obs_xs=..., obs_ys=..., obstacle_now=...)
+    """
     if fig is None:
         return
 
+    # OLD behavior: update follow points + cone fill
     lidar_points_plot.set_data(xs, ys)
 
     cone = CONE_HALF_W
@@ -454,6 +546,12 @@ def update_plot(aim_angle, xs, ys, detected):
     fov_right_line.set_data(right_x, right_y)
     fov_left_line.set_color(color)
     fov_right_line.set_color(color)
+
+    # NEW overlay: obstacle sector dots (without removing old plot)
+    if (obs_xs is not None) and (obs_ys is not None) and (obs_points_plot is not None):
+        obs_points_plot.set_data(obs_xs, obs_ys)
+        # red if obstacle detected, gray otherwise
+        obs_points_plot.set_color("red" if obstacle_now else "gray")
 
     fig.canvas.draw()
     fig.canvas.flush_events()
@@ -553,6 +651,11 @@ def main():
 
     prev_robot_enabled = robot_enabled
 
+    # NEW (state for obstacle ignore wedge + reacquire)
+    last_offset_norm = 0.0
+    last_aim_angle = 0.0
+    reacquire_start_time = None
+
     print(f"Stay in view for ~{LOCK_VISIBLE_TIME_SEC} seconds to lock person")
 
     try:
@@ -587,6 +690,11 @@ def main():
                 forward_cmd = 0.0
                 turn_cmd    = 0.0
                 tank(0, 0)
+
+                last_offset_norm = 0.0
+                last_aim_angle = 0.0
+                reacquire_start_time = None
+
                 print("[RF] New Start")
             prev_robot_enabled = robot_enabled
 
@@ -638,7 +746,7 @@ def main():
                         candidate_visible_this_frame = False
                         candidate_visible_start_t = None
                         candidate_visible_time = 0.0
-                        
+
                         state_str = "CANDIDATE_NOT_VISIBLE"
 
                     # Continuous visibility timing
@@ -725,6 +833,9 @@ def main():
             has_lock_and_bbox = tracked_active and (tracked_bbox is not None)
 
             if has_lock_and_bbox:
+                # we see person: update last-known direction and cancel reacquire timer
+                reacquire_start_time = None
+
                 xmin, ymin, xmax, ymax = tracked_bbox
 
                 x_center = (xmin + xmax) / 2.0
@@ -743,12 +854,20 @@ def main():
 
                 frame_center_x = imW / 2.0
                 offset_norm = (x_center - frame_center_x) / frame_center_x
+                last_offset_norm = offset_norm
 
                 aim_angle = offset_norm * (CAMERA_FOV_RAD / 2.0)
+                last_aim_angle = aim_angle
 
                 target_turn_cmd = compute_turn_cmd(offset_norm)
+            else:
+                # if not visible, keep using last aim angle for lidar ignore wedge + plot cone
+                aim_angle = last_aim_angle
 
-            front_distance, xs, ys = read_lidar_cone(aim_angle)
+            # ---- LiDAR read (follow cone + obstacle sector) ----
+            front_distance, follow_xs, follow_ys, obs_xs, obs_ys, obs_left_ct, obs_right_ct, obs_min_dist = (
+                read_lidar_follow_and_obstacles(last_aim_angle, have_person=tracked_active)
+            )
 
             if has_lock_and_bbox and (front_distance is not None):
                 cv2.putText(
@@ -773,9 +892,43 @@ def main():
             else:
                 target_forward_cmd = 0.0
 
+            # ==========================================================
+            # REACQUIRE (tank turn until we see the person again; timeout is max)
+            # ==========================================================
             if not has_lock_and_bbox:
                 target_forward_cmd = 0.0
-                target_turn_cmd = 0.0
+
+                if robot_enabled and tracked_active:
+                    if reacquire_start_time is None:
+                        reacquire_start_time = now
+
+                    if (now - reacquire_start_time) <= REACQUIRE_TIME_SEC:
+                        reacq_turn = compute_turn_cmd(last_offset_norm)
+                        reacq_turn = float(np.clip(reacq_turn, -REACQUIRE_TURN_MAX, +REACQUIRE_TURN_MAX))
+                        target_turn_cmd = reacq_turn
+                        state_str = state_str + " | REACQUIRE_TANK"
+                    else:
+                        target_turn_cmd = 0.0
+                        state_str = state_str + " | REACQUIRE_TIMEOUT"
+                else:
+                    target_turn_cmd = 0.0
+                    reacquire_start_time = None
+            # ==========================================================
+
+            close_pts = obs_left_ct + obs_right_ct
+            obstacle_now = (obs_min_dist is not None and obs_min_dist <= OBS_AVOID_DIST and close_pts >= OBS_MIN_PTS)
+
+            if robot_enabled and (target_forward_cmd > 5.0) and obstacle_now:
+                # obstacle on RIGHT => swerve LEFT (positive turn)
+                if obs_right_ct > obs_left_ct:
+                    target_turn_cmd += +OBS_BIAS_TURN
+                    state_str += " | OBS_RIGHT_SWERVE_LEFT"
+                else:
+                    target_turn_cmd += -OBS_BIAS_TURN
+                    state_str += " | OBS_LEFT_SWERVE_RIGHT"
+
+                target_turn_cmd = float(np.clip(target_turn_cmd, -100.0, 100.0))
+            # ==========================================================
 
             if robot_enabled:
                 forward_cmd = smooth(forward_cmd, target_forward_cmd, ACCEL_LINEAR, dt)
@@ -810,6 +963,8 @@ def main():
                 print(
                     f"[MOTION] {motion_str} | state={state_str} | "
                     f"dist={front_distance if front_distance is not None else 'None'} | "
+                    f"obs_min={obs_min_dist if obs_min_dist is not None else 'None'} "
+                    f"obsL={obs_left_ct} obsR={obs_right_ct} | "
                     f"L={left:.1f} R={right:.1f}"
                 )
             else:
@@ -873,7 +1028,27 @@ def main():
                     2,
                 )
 
-            update_plot(aim_angle, xs, ys, has_lock_and_bbox)
+            # NEW debug line (doesn't remove anything)
+            cv2.putText(
+                frame,
+                f"OBS: min={obs_min_dist if obs_min_dist is not None else -1:.2f} L={obs_left_ct} R={obs_right_ct}",
+                (30, 200),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 200, 0),
+                2,
+            )
+
+            # Plot: keep old cone + add obstacle overlay
+            update_plot(
+                aim_angle,
+                follow_xs,
+                follow_ys,
+                has_lock_and_bbox,
+                obs_xs=obs_xs,
+                obs_ys=obs_ys,
+                obstacle_now=obstacle_now
+            )
 
             cv2.imshow("Person Follow + Lock", frame)
 

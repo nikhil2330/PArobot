@@ -20,14 +20,14 @@ from threading import Thread
 CAMERA_FOV_DEG = 60.0  # camera fov
 CAMERA_FOV_RAD = math.radians(CAMERA_FOV_DEG)
 
-TURN_SPEED_TARGET    = 30.0   # target turn speed (percent)
-FORWARD_SPEED_TARGET = 35.0   # target linear speed (percent)
+TURN_SPEED_TARGET    = 25.0   # target turn speed (percent)
+FORWARD_SPEED_TARGET = 30.0   # target linear speed (percent)
 CENTER_DEADZONE      = 0.10   # value where side to side jitter decreases
 
-ACCEL_LINEAR = 90.0   # how fast forward/back can change (percent/sec)
-ACCEL_TURN   = 90.0   # how fast turn can change (percent/sec)
+ACCEL_LINEAR = 80.0   # how fast forward/back can change (percent/sec)
+ACCEL_TURN   = 70.0   # how fast turn can change (percent/sec)
 
-FOLLOW_NEAR = 0.8      # too close -> back up
+FOLLOW_NEAR = 1.0      # too close -> back up
 FOLLOW_FAR  = 1.3      # too far   -> go forward
 
 RANGE_MIN      = 0.15
@@ -36,7 +36,7 @@ CONE_HALF_W    = math.radians(6.0)   # LiDAR cone half-width around aim angle
 PLOT_MAX_RANGE = 4.0                 # max range to show in LiDAR plot
 
 TURN_KP = 60.0          # max turn percent at full screen offset (tune 40..90)
-MIN_INNER_RATIO = 0.35  # inner wheel keeps at least 35% of forward (tune 0.25..0.6)
+MIN_INNER_RATIO = 0.55  # inner wheel keeps at least 35% of forward (tune 0.25..0.6)
 
 # Motor inversion flags
 INV_LEFT  = False
@@ -519,7 +519,7 @@ def main():
 
     print("Initializing TFLite model...")
     init_tflite(args.modeldir, args.graph, args.labels, use_tpu=args.edgetpu)
- 
+
     print("Initializing LiDAR...")
     init_lidar(port="/dev/ttyUSB0", baud=115200)
 
