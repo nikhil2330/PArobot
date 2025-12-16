@@ -30,7 +30,7 @@ ACCEL_TURN   = 70.0   # how fast turn can change (percent/sec)
 FOLLOW_NEAR = 1.0      # too close -> back up
 FOLLOW_FAR  = 1.3      # too far   -> go forward
 
-RANGE_MIN      = 0.15
+RANGE_MIN      = 0.25
 RANGE_MAX      = 5.00
 CONE_HALF_W    = math.radians(6.0)   # LiDAR cone half-width around aim angle
 PLOT_MAX_RANGE = 4.0                 # max range to show in LiDAR plot

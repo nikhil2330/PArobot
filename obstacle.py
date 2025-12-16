@@ -24,7 +24,7 @@ from gpiozero import PWMLED, LED
 import ydlidar
 
 
-RANGE_MIN      = 0.15
+RANGE_MIN      = 0.25
 RANGE_MAX      = 5.00
 PLOT_MAX_RANGE = 4.0
 
